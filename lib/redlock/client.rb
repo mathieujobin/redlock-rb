@@ -148,13 +148,13 @@ module Redlock
 
     class RedisInstance
       module ConnectionPoolLike
-        def with
+        def run_with
           yield self
         end
       end
 
       def initialize(connection)
-        if connection.respond_to?(:with)
+        if connection.respond_to?(:run_with)
           @redis = connection
         else
           if connection.respond_to?(:client)
@@ -168,13 +168,22 @@ module Redlock
 
       def lock(resource, val, ttl, allow_new_lock)
         recover_from_script_flush do
-          @redis.with { |conn| conn.evalsha Scripts::LOCK_SCRIPT_SHA, keys: [resource], argv: [val, ttl, allow_new_lock] }
+          @redis.run_with { |conn|
+            conn.evalsha Scripts::LOCK_SCRIPT_SHA, keys: [resource], argv: [val, ttl, allow_new_lock]
+          }
+          # new version from 2.x
+          # @redis.run_with { |conn|
+          #   conn.call('EVALSHA', Scripts::LOCK_SCRIPT_SHA, 1, resource, val, ttl, allow_new_lock)
+          # }
         end
       end
 
       def unlock(resource, val)
         recover_from_script_flush do
-          @redis.with { |conn| conn.evalsha Scripts::UNLOCK_SCRIPT_SHA, keys: [resource], argv: [val] }
+          @redis.run_with { |conn| conn.evalsha Scripts::UNLOCK_SCRIPT_SHA, keys: [resource], argv: [val] }
+          #@redis.run_with { |conn|
+          #  conn.call('EVALSHA', Scripts::UNLOCK_SCRIPT_SHA, 1, resource, val)
+          #}
         end
       rescue
         # Nothing to do, unlocking is just a best-effort attempt.
@@ -182,7 +191,10 @@ module Redlock
 
       def get_remaining_ttl(resource)
         recover_from_script_flush do
-          @redis.with { |conn| conn.evalsha Scripts::PTTL_SCRIPT_SHA, keys: [resource] }
+          @redis.run_with { |conn| conn.evalsha Scripts::PTTL_SCRIPT_SHA, keys: [resource] }
+          #@redis.run_with { |conn|
+          #  conn.call('EVALSHA', Scripts::PTTL_SCRIPT_SHA, 1, resource)
+          #}
         end
       rescue Redis::BaseConnectionError
         nil
@@ -198,7 +210,11 @@ module Redlock
         ]
 
         scripts.each do |script|
-          @redis.with { |conn| conn.script(:load, script) }
+          @redis.run_with { |conn| conn.script(:load, script) }
+        #@redis.run_with do |connnection|
+        #  scripts.each do |script|
+        #    connnection.call('SCRIPT', 'LOAD', script)
+        #  end
         end
       end
 
